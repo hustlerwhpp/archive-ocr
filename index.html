@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Архив OCR — оцифровка рукописей и машинописного текста</title>
 <link rel="stylesheet" href="styles.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2e4a3d">
+<link rel="apple-touch-icon" href="icon-192.png">
 <!-- Tesseract.js v6 — движок OCR, работает в браузере через WebAssembly -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
 <!-- pdf.js 3.11.174 — рендер страниц PDF в Canvas, тоже локально -->
@@ -17,6 +20,11 @@
   <h1>Архив OCR</h1>
   <p class="subtitle">Оцифровка рукописей и машинописного текста — полностью в браузере, без сервера. Фото не покидают этот компьютер.</p>
   <p class="hint">Бесплатно, без ключей и регистрации. Первый запуск скачивает движок и языковые данные (~10–15 МБ), дальше работает офлайн из кэша браузера.</p>
+  <div class="pwa-row">
+    <button id="installBtn" type="button" hidden>Установить приложение</button>
+    <span id="iosHint" class="hint" hidden>На iPhone/iPad: «Поделиться» → «На экран “Домой”» — приложение появится как отдельное и будет работать офлайн.</span>
+    <span id="updateBanner" class="hint" hidden>Доступна новая версия приложения. <button id="updateBtn" type="button">Обновить</button></span>
+  </div>
 </header>
 
 <main class="layout">
@@ -24,6 +32,20 @@
     <details open>
       <summary><strong>Настройки распознавания</strong></summary>
       <div class="settings-grid">
+        <fieldset class="quality">
+          <legend>Движок распознавания</legend>
+          <label><input type="radio" name="engine" value="tesseract" checked> Печать (Tesseract)</label>
+          <label><input type="radio" name="engine" value="ppocr"> Рукопись (PP-OCRv6, бета)</label>
+        </fieldset>
+        <fieldset class="quality">
+          <legend>Лимит памяти (нейросети)</legend>
+          <label>Максимум RAM вкладки: <span id="ramValue">2 ГБ</span>
+            <input type="range" id="ramRange" min="1" max="8" step="1" value="2">
+          </label>
+          <p id="ramTierInfo" class="hint"></p>
+          <p id="trocrSoonWarning" class="warning" hidden>TrOCR — скоро: режим ещё не подключён, нужна переконвертация декодера модели. Распознавание на этом лимите пока недоступно; выберите 1–2 ГБ для PP-OCRv6.</p>
+        </fieldset>
+        <div id="tesseractSettings" style="display:contents">
         <label>Язык
           <select id="langSelect">
             <option value="rus" selected>Русский (rus)</option>
@@ -39,6 +61,7 @@
             <option value="4">4 — одна колонка</option>
           </select>
         </label>
+        </div>
         <fieldset class="quality">
           <legend>Режим качества (для слабых ПК)</legend>
           <label><input type="radio" name="quality" value="economy"> Экономный — до 1200 px, быстрее всего</label>
@@ -59,6 +82,25 @@
         Внимание: Tesseract плохо читает рукописный текст, особенно курсив и старую орфографию.
         Результат ниже — только черновик для ручной сверки с оригиналом, а не автоматическая оцифровка рукописи.
       </p>
+      <p id="ppocrWarning" class="warning" hidden>
+        Бета: аккуратный почерк читает хорошо, курсив — с ошибками. Сверяйте с фото и правьте вручную.
+        Для переключения обратно на печатный текст выберите движок «Печать (Tesseract)».
+      </p>
+      <div id="ppocrSettings" hidden>
+        <div class="settings-grid">
+          <fieldset class="quality">
+            <legend>Точность (рукописи)</legend>
+            <label><input type="radio" name="ppocrAccuracy" value="tiny" checked> Эконом (Tiny, ~4 МБ)</label>
+            <label><input type="radio" name="ppocrAccuracy" value="medium"> Точный (Medium, ~60 МБ)</label>
+          </fieldset>
+          <fieldset class="quality">
+            <legend>Поиск строк</legend>
+            <label><input type="radio" name="ppocrDetect" value="auto" checked> Авто (нейросеть)</label>
+            <label><input type="radio" name="ppocrDetect" value="lines"> По строкам (быстро, проекционный профиль)</label>
+          </fieldset>
+        </div>
+        <p class="hint">При первом распознавании скачиваются модели: детектор строк ~1,7 МБ + распознаватель Tiny ~2,4 МБ (или Medium ~60 МБ). Модели кэшируются в браузере (IndexedDB) — повторный визит без скачивания, дальше работает офлайн. Бинаризация по Отсу в этом режиме не применяется: синие чернила и курсив от неё страдают.</p>
+      </div>
     </details>
   </section>
 
@@ -73,6 +115,7 @@
     <div class="row">
       <button id="sampleBtn" type="button">Пример для проверки</button>
       <button id="recognizeAllBtn" type="button" class="primary">Распознать всё</button>
+      <button id="reRecognizeBtn" type="button" disabled>Распознать заново</button>
       <button id="stopBtn" type="button" disabled>Стоп</button>
     </div>
     <div class="progress" aria-label="Прогресс распознавания">
@@ -125,7 +168,8 @@
 
 <footer class="footer">
   <p>Всё считается локально. Нет сервера, нет отправки фото, нет платных ключей.</p>
-  <p>Ограничение: рукописи Tesseract читает плохо — используйте режим помощника транскрибации и сверяйте вручную. Следующий шаг развития — локальная нейросеть PP-OCRv6 Cyrillic (см. README).</p>
+  <p>Ограничение: рукописи Tesseract читает плохо — используйте режим «Рукопись (PP-OCRv6, бета)» и сверяйте вручную. Курсив PP-OCRv6 тоже читает с ошибками (см. README).</p>
+  <p>Приложение можно установить на компьютер или телефон (PWA): после первого запуска оно работает офлайн, модели кэшируются в браузере.</p>
 </footer>
 
 <script src="app.js"></script>

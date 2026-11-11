@@ -41,11 +41,15 @@ function currentQuality() {
   const checked = document.querySelector('input[name="quality"]:checked');
   return checked ? checked.value : 'normal';
 }
+function currentEngine() {
+  const checked = document.querySelector('input[name="engine"]:checked');
+  return checked ? checked.value : 'tesseract';
+}
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 // ---------- Загрузка файлов: выбор, drag-and-drop, вставка из буфера ----------
 function addPage(name, src, knownText) {
-  const page = { id: ++pageCounter, name, src, knownText: knownText || null, text: '', words: [], confidence: null, timeMs: null, done: false };
+  const page = { id: ++pageCounter, name, src, knownText: knownText || null, text: '', words: [], confidence: null, timeMs: null, done: false, engine: null };
   pages.push(page);
   renderQueue();
   if (selectedId === null) selectPage(page.id);
@@ -167,6 +171,490 @@ function readSettings(overrides) {
   };
 }
 
+// ---------- Режим «Рукопись»: PP-OCRv6 (ONNX, onnxruntime-web, всё локально) ----------
+// Детектор строк: PP-OCRv6 tiny det (PaddlePaddle, ~1,7 МБ).
+// Распознаватель строк: PP-OCRv6 tiny/medium rec Cyrillic (Metrika Labs, ~2,4 / ~60 МБ).
+// Проверено Node-тестом 2026-11-11: выход det — карта вероятностей в ПОЛНОМ разрешении
+// входа (а не 1/4, как у классического DBNet), выход rec — уже ВЕРОЯТНОСТИ
+// [1, T, 852] (сумма по строке = 1.0, softmax НЕ применять): 0 = blank,
+// 1..850 = словарь ниже, 851 = пробел (проверено: встречается между словами).
+// Модели в репозиторий НЕ кладутся: скачиваются с HuggingFace при первом использовании
+// и кэшируются в IndexedDB ('archive-ocr-models').
+const PPOCR_DICT = "!\"#$%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_`abcdefghijklmnopqrstuvwxyz©‥{}\\|@^~÷∕∙⋅·±∓∩∪□←↔⇒⇐⇔∀∃∄∴∵∝∞⊥∟∠∡∢′″∥⊾⊿∂∫∬∭∮∯∰∑∏√∛∜∱∲∳∶∷∼®℉Ω℧Å⌀ℏ⅀⍺⍵¢€£¥₿ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹⅺⅻ➀➁➂➃➄➅➆➇➈➉➊➋➌➍➎➏➐➑➒➓❶❷❸❹❺❻❼❽❾❿①②③④⑤⑥⑦⑧⑨⑩●▶𝑢︽–﹥𝜓•∋ƒ०⬆Ạ◀▫︾ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ¡¤¦§¨ª«¬¯°²³´µ¶¸¹º»¼½¾¿×‐‑‒—―‖‗‘’‚‛“”„‟†‡‣․…‧‰‴‵‶‷‸‹›※‼‽‾₤₡₹−∖∗≈≠≡≤≥⊂⊃↑→↓↕™Ω℮∆✓✗✘▪◼✔✕☑☒№₽₴ΑαΒβΓγΔδΕεΖζΗηΘθΙιΚκΛλΜμΝνΞξΟοΠπΡρΣσςΤτΥυΦφΧχΨψωЀЁЂЃЄЅІЇЈЉЊЋЌЍЎЏАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюяѐёђѓєѕіїјљњћќѝўџѠѡѢѣѤѥѦѧѨѩѪѫѬѭѮѯѰѱѲѳѴѵѶѷѸѹѺѻѼѽѾѿҀҁҊҋҌҍҎҏҐґҒғҔҕҖҗҘҙҚқҜҝҞҟҠҡҢңҦҧҨҩҪҫҬҭҮүҰұҲҳҶҷҸҹҺһҼҽҾҿӀӁӂӃӄӅӆӇӈӉӊӋӌӍӎӏӐӑӒӓӖӗӘәӚӛӜӝӞӟӠӡӢӣӤӥӦӧӨөӪӫӬӭӮӯӰӱӲӳӴӵӶӷӸӹӺӻӼӽӾӿԀԁԂԃԄԅԆԇԈԉԊԋԌԍԎԏԐԑԒԓԔԕԖԗԘԙԚԛԜԝԞԟԠԡԢԣԤԥԦԧԨԩԪԫԬԭԮԯⷠⷡⷢⷣⷤⷥⷦⷧⷨⷩⷪⷫⷬⷭⷮⷯⷰⷱⷲⷳⷴⷵⷶⷷⷸⷹⷺⷻⷼⷽⷾⷿꙀꙁꙂꙃꙄꙅꙆꙇꙈꙉꙊꙋꙌꙍꙎꙏꙐꙑꙒꙓꙔꙕꙖꙗꙘꙙꙚꙛꙜꙝꙞꙟꙠꙡꙢꙣꙤꙥꙦꙧꙨꙩꙪꙫꙬꙭꙮꙴꙵꙶꙷꙸꙹꙺꙻꚀꚁꚂꚃꚄꚅꚆꚇꚈꚉꚊꚋꚌꚍꚎꚏꚐꚑꚒꚓꚔꚕꚖꚗꚘꚙꚚꚛꚜꚝꚞꚟ";
+const PPOCR_DICT_CHARS = Array.from(PPOCR_DICT); // именно Array.from: в словаре есть 2 символа вне BMP
+const PPOCR_URLS = {
+  ort: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/ort.min.js',
+  ortDist: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/',
+  det: 'https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_det_onnx/resolve/main/inference.onnx',
+  detSmall: 'https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx/resolve/main/inference.onnx',
+  recTiny: 'https://huggingface.co/metrika-labs/PP-OCRv6_tiny_rec_cyrillic_onnx/resolve/main/inference.onnx',
+  recMedium: 'https://huggingface.co/metrika-labs/PP-OCRv6_medium_rec_cyrillic_onnx/resolve/main/inference.onnx',
+};
+let ortLoading = null;           // промис загрузки onnxruntime-web (лениво, один раз)
+let ppocrSessions = { det: null, detKey: null, recTiny: null, recMedium: null };
+
+// ---------- Лимит памяти: 1–8 ГБ, шаг 1 ГБ (настройка на сайте) ----------
+// Чем больше лимит, тем тяжелее модель. 1 ГБ — PP-OCRv6 Tiny (замерено),
+// 2 ГБ — Small det + Medium rec, 3–8 ГБ — TrOCR (ПОКА НЕ ПОДКЛЮЧЁН:
+// нужна переконвертация декодера в merged-формат с KV-кэшем; ручной путь без
+// кэша даёт 5–20 мин/страницу и не годится). Размеры скачивания — десятичные МБ.
+// RAM вкладки — оценка с учётом рантайма и активаций; для fp32 есть риск упереться
+// в лимит кучи WASM ~4 ГБ и уронить вкладку (по данным исследования TrOCR).
+const RAM_TIERS = [
+  { gb: 1, key: 'tiny', label: 'PP-OCRv6 Tiny', det: 'tiny', rec: 'tiny', download: '~4 МБ моделей + ~14 МБ рантайм', ram: '~0,3–0,5 ГБ', status: 'ready', note: 'Замерено на курсиве: 46–47% точности, ~2 сек/стр.' },
+  { gb: 2, key: 'medium', label: 'PP-OCRv6 Small det + Medium rec', det: 'small', rec: 'medium', download: '~72 МБ моделей + ~14 МБ рантайм', ram: '~1–1,5 ГБ', status: 'ready', note: 'Честно: на курсиве Medium замеренно хуже Tiny (27% против 46%). Medium лучше для аккуратного почерка и печатного текста.' },
+  { gb: 3, key: 'trocr-q4', label: 'TrOCR q4f16', det: null, rec: null, download: '~294 МБ', ram: '~0,7–1 ГБ', status: 'soon', note: 'Скоро: режим ещё не подключён, нужна переконвертация декодера TrOCR.' },
+  { gb: 4, key: 'trocr-int8', label: 'TrOCR int8 (рекомендуемый максимум)', det: null, rec: null, download: '~388 МБ', ram: '~1–1,5 ГБ', status: 'soon', note: 'Скоро: режим ещё не подключён, нужна переконвертация декодера TrOCR.' },
+  { gb: 5, key: 'trocr-int8-beam', label: 'TrOCR int8 + beam search', det: null, rec: null, download: '~388 МБ', ram: '~2 ГБ', status: 'soon', note: 'Скоро: режим ещё не подключён, нужна переконвертация декодера TrOCR.' },
+  { gb: 6, key: 'trocr-fp16', label: 'TrOCR fp16', det: null, rec: null, download: '~770 МБ', ram: '~2–3 ГБ', status: 'soon', note: 'Скоро: режим ещё не подключён, нужна переконвертация декодера TrOCR.' },
+  { gb: 7, key: 'trocr-fp32', label: 'TrOCR fp32', det: null, rec: null, download: '~1,5 ГБ', ram: '~3,5–4,5 ГБ', status: 'soon', note: 'Скоро: режим ещё не подключён. Внимание: fp32 рискует упереться в лимит кучи WASM ~4 ГБ и уронить вкладку.' },
+  { gb: 8, key: 'trocr-fp32-max', label: 'TrOCR fp32 + запас', det: null, rec: null, download: '~1,5 ГБ', ram: '~4–5 ГБ', status: 'soon', note: 'Скоро: режим ещё не подключён. Внимание: fp32 рискует упереться в лимит кучи WASM ~4 ГБ и уронить вкладку.' },
+];
+
+// TrOCR (Mievst/trocr-base-handwritten-ru-ONNX) — только константа с URL для
+// будущего подключения. Кода TrOCR здесь намеренно нет (см. комментарий выше).
+// Все URL проверены (HTTP 302 на CDN HuggingFace — файл существует).
+const TROCR_URLS = {
+  repo: 'https://huggingface.co/Mievst/trocr-base-handwritten-ru-ONNX',
+  encoderInt8: 'https://huggingface.co/Mievst/trocr-base-handwritten-ru-ONNX/resolve/main/onnx/encoder_model_int8.onnx', // 87 942 932 Б
+  decoderInt8: 'https://huggingface.co/Mievst/trocr-base-handwritten-ru-ONNX/resolve/main/onnx/decoder_model_int8.onnx', // 300 116 959 Б
+  encoderQ4: 'https://huggingface.co/Mievst/trocr-base-handwritten-ru-ONNX/resolve/main/onnx/encoder_model_q4f16.onnx', // 50 218 204 Б
+  decoderQ4: 'https://huggingface.co/Mievst/trocr-base-handwritten-ru-ONNX/resolve/main/onnx/decoder_model_q4f16.onnx', // 243 664 494 Б
+};
+
+const RAM_LIMIT_KEY = 'archiveOcrRamLimitGb';
+const RAM_LIMIT_DEFAULT = 2;
+
+function currentRamLimit() {
+  const el = $('ramRange');
+  const v = el ? parseInt(el.value, 10) : RAM_LIMIT_DEFAULT;
+  return Math.min(8, Math.max(1, isNaN(v) ? RAM_LIMIT_DEFAULT : v));
+}
+function ramTier() {
+  const gb = currentRamLimit();
+  return RAM_TIERS.find((t) => t.gb === gb) || RAM_TIERS[1];
+}
+function ppocrAccuracy() {
+  const checked = document.querySelector('input[name="ppocrAccuracy"]:checked');
+  return checked ? checked.value : 'tiny';
+}
+
+// Эффективная конфигурация PP-OCR для текущего лимита и выбранной точности.
+// 1 ГБ — всегда Tiny; 2 ГБ — Tiny или Small det + Medium rec (по радио «Точность»).
+function effectivePpocrConfig() {
+  const tier = ramTier();
+  if (tier.status === 'soon') return { tier, status: 'soon', det: null, rec: null };
+  const acc = ppocrAccuracy();
+  return {
+    tier, status: 'ready',
+    det: (tier.gb >= 2 && acc === 'medium') ? 'small' : 'tiny',
+    rec: acc,
+  };
+}
+
+// Выгрузка сессий PP-OCR, которые не нужны новому лимиту (освободить память).
+// ort.InferenceSession.release есть в onnxruntime-web; вызов — в try/catch,
+// отсутствие метода не ломает работу.
+async function releasePpocrSession(s) {
+  if (!s) return;
+  try { if (typeof s.release === 'function') await s.release(); } catch (e) { /* игнорируем */ }
+}
+async function releasePpocrSessionsForTier() {
+  const cfg = effectivePpocrConfig();
+  if (cfg.status === 'soon') {
+    await releasePpocrSession(ppocrSessions.det);
+    ppocrSessions.det = null; ppocrSessions.detKey = null;
+    await releasePpocrSession(ppocrSessions.recTiny); ppocrSessions.recTiny = null;
+    await releasePpocrSession(ppocrSessions.recMedium); ppocrSessions.recMedium = null;
+    return;
+  }
+  if (ppocrSessions.det && ppocrSessions.detKey !== cfg.det) {
+    await releasePpocrSession(ppocrSessions.det);
+    ppocrSessions.det = null; ppocrSessions.detKey = null;
+  }
+  if (cfg.rec === 'tiny' && ppocrSessions.recMedium) {
+    await releasePpocrSession(ppocrSessions.recMedium); ppocrSessions.recMedium = null;
+  }
+  if (cfg.rec === 'medium' && ppocrSessions.recTiny) {
+    await releasePpocrSession(ppocrSessions.recTiny); ppocrSessions.recTiny = null;
+  }
+}
+
+// Обновить подпись лимита памяти и состояние радио «Точность»:
+// Medium недоступен при лимите 1 ГБ (нужно минимум 2 ГБ).
+function updateRamUi() {
+  const tier = ramTier();
+  const cfg = effectivePpocrConfig();
+  $('ramValue').textContent = tier.gb + ' ГБ';
+  const info = $('ramTierInfo');
+  if (cfg.status === 'soon') {
+    info.textContent = tier.gb + ' ГБ → ' + tier.label + '. Скачивание при первом запуске: ' + tier.download + '. RAM вкладки: ' + tier.ram + '. ' + tier.note;
+  } else {
+    const detName = cfg.det === 'small' ? 'Small' : 'Tiny';
+    const recName = cfg.rec === 'medium' ? 'Medium' : 'Tiny';
+    info.textContent = tier.gb + ' ГБ → PP-OCRv6: детектор ' + detName + ' + распознаватель ' + recName + '. Скачивание при первом запуске: ' + tier.download + '. RAM вкладки: ' + tier.ram + '. ' + tier.note;
+  }
+  $('trocrSoonWarning').hidden = cfg.status !== 'soon';
+  const mediumRadio = document.querySelector('input[name="ppocrAccuracy"][value="medium"]');
+  const tinyRadio = document.querySelector('input[name="ppocrAccuracy"][value="tiny"]');
+  if (mediumRadio) {
+    mediumRadio.disabled = tier.gb < 2;
+    if (tier.gb < 2 && tinyRadio) tinyRadio.checked = true;
+  }
+}
+
+async function onRamLimitChange() {
+  try { localStorage.setItem(RAM_LIMIT_KEY, String(currentRamLimit())); } catch (e) { /* localStorage может быть недоступен */ }
+  updateRamUi();
+  try { await releasePpocrSessionsForTier(); } catch (e) { /* выгрузка необязательна */ }
+}
+
+// Цветной кадр для PP-OCR: ресайз, поворот, контраст — но БЕЗ бинаризации и без
+// перевода в серый (синие чернила и курсив от бинаризации страдают).
+async function prepareColorCanvas(src, opts) {
+  const img = await loadImage(src);
+  const maxSide = opts.maxSide || 1800;
+  const longest = Math.max(img.naturalWidth, img.naturalHeight);
+  let scale = longest > maxSide ? maxSide / longest : 1;
+  if (opts.allowUpscale && longest < maxSide) scale = Math.min(1.5, maxSide / longest);
+  const w = Math.max(1, Math.round(img.naturalWidth * scale));
+  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+  if (opts.rotateDeg) {
+    ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(opts.rotateDeg * Math.PI / 180);
+    ctx.drawImage(img, -w / 2, -h / 2, w, h); ctx.restore();
+  } else {
+    ctx.drawImage(img, 0, 0, w, h);
+  }
+  if (opts.contrast && opts.contrast !== 1) {
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const d = imageData.data, c = opts.contrast;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = Math.max(0, Math.min(255, (d[i] - 128) * c + 128));
+      d[i + 1] = Math.max(0, Math.min(255, (d[i + 1] - 128) * c + 128));
+      d[i + 2] = Math.max(0, Math.min(255, (d[i + 2] - 128) * c + 128));
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+  return canvas;
+}
+
+function resizeCanvasTo(srcCanvas, maxSide) {
+  const longest = Math.max(srcCanvas.width, srcCanvas.height);
+  if (longest <= maxSide) return srcCanvas;
+  const scale = maxSide / longest;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(srcCanvas.width * scale));
+  canvas.height = Math.max(1, Math.round(srcCanvas.height * scale));
+  canvas.getContext('2d').drawImage(srcCanvas, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+// Ленивая загрузка onnxruntime-web. Один поток WASM: на GitHub Pages нет COOP/COEP,
+// SharedArrayBuffer недоступен, многопоточность включить нельзя.
+async function loadOrt() {
+  if (typeof ort !== 'undefined') return ort;
+  if (ortLoading) return ortLoading;
+  ortLoading = new Promise((resolve, reject) => {
+    setStatus('Загружаю движок рукописей (onnxruntime-web)…');
+    const s = document.createElement('script');
+    s.src = PPOCR_URLS.ort;
+    s.onload = () => {
+      try {
+        ort.env.wasm.numThreads = 1;
+        ort.env.wasm.wasmPaths = PPOCR_URLS.ortDist;
+        resolve(ort);
+      } catch (e) { reject(e); }
+    };
+    s.onerror = () => reject(new Error('Не удалось загрузить onnxruntime-web с CDN jsDelivr. Проверьте интернет и обновите страницу.'));
+    document.head.appendChild(s);
+  });
+  return ortLoading;
+}
+
+function ppocrIdb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('archive-ocr-models', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('models');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(new Error('IndexedDB недоступен в этом браузере — модели придётся скачивать при каждом запуске.'));
+  });
+}
+
+// Скачать модель (с прогрессом в статусе) или взять из кэша IndexedDB.
+async function ppocrCached(key, url, label) {
+  let db = null;
+  try {
+    db = await ppocrIdb();
+    const cached = await new Promise((resolve) => {
+      const tx = db.transaction('models', 'readonly');
+      const req = tx.objectStore('models').get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+    if (cached) return cached;
+  } catch (e) { /* без кэша — просто скачаем */ }
+  setStatus('Скачиваю модель рукописей: ' + label + '…');
+  setProgress(0);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('Не удалось скачать модель рукописей (' + label + ', HTTP ' + resp.status + '). Проверьте интернет и попробуйте ещё раз.');
+  const total = parseInt(resp.headers.get('content-length') || '0', 10);
+  let buf;
+  if (resp.body && resp.body.getReader && total > 0) {
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      setStatus('Скачиваю модель рукописей: ' + label + ' — ' + Math.round((received / total) * 100) + '%');
+      setProgress(Math.round((received / total) * 100));
+    }
+    const all = new Uint8Array(received);
+    let off = 0;
+    for (const c of chunks) { all.set(c, off); off += c.length; }
+    buf = all.buffer;
+  } else {
+    buf = await resp.arrayBuffer();
+  }
+  if (db) {
+    try {
+      const tx = db.transaction('models', 'readwrite');
+      tx.objectStore('models').put(buf, key);
+    } catch (e) { /* кэш необязателен */ }
+  }
+  setProgress(100);
+  return buf;
+}
+
+async function getPpocrSessions() {
+  if (PPOCR_DICT_CHARS.length !== 850) throw new Error('Внутренняя ошибка: словарь распознавателя повреждён (ожидалось 850 символов).');
+  await loadOrt();
+  const cfg = effectivePpocrConfig();
+  const acc = cfg.rec; // 'tiny' | 'medium' (для soon сюда не доходим — см. recognizePpocrPage)
+  const detKey = cfg.det; // 'tiny' | 'small'
+  if (!ppocrSessions.det || ppocrSessions.detKey !== detKey) {
+    if (ppocrSessions.det) { await releasePpocrSession(ppocrSessions.det); ppocrSessions.det = null; }
+    const detUrl = detKey === 'small' ? PPOCR_URLS.detSmall : PPOCR_URLS.det;
+    const detLabel = detKey === 'small' ? 'детектор строк Small (~9,9 МБ)' : 'детектор строк (~1,7 МБ)';
+    const buf = await ppocrCached(detKey === 'small' ? 'detSmall' : 'det', detUrl, detLabel);
+    setStatus('Загружаю детектор строк…');
+    ppocrSessions.det = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
+    ppocrSessions.detKey = detKey;
+  }
+  const recKey = acc === 'medium' ? 'recMedium' : 'recTiny';
+  if (!ppocrSessions[recKey]) {
+    const buf = await ppocrCached(recKey, acc === 'medium' ? PPOCR_URLS.recMedium : PPOCR_URLS.recTiny,
+      acc === 'medium' ? 'распознаватель Medium (~60 МБ)' : 'распознаватель Tiny (~2,4 МБ)');
+    setStatus('Загружаю распознаватель ' + (acc === 'medium' ? 'Medium' : 'Tiny') + '…');
+    ppocrSessions[recKey] = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
+  }
+  return { det: ppocrSessions.det, rec: ppocrSessions[recKey] };
+}
+
+// Группировка рамок в строки: сверху вниз, внутри строки — слева направо.
+function sortLineBoxes(boxes) {
+  const sorted = boxes.slice().sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+  const rows = [];
+  for (const b of sorted) {
+    const cy = (b.y0 + b.y1) / 2;
+    let row = rows.find((r) => {
+      const rcy = (r[0].y0 + r[0].y1) / 2;
+      return Math.abs(cy - rcy) < Math.max(10, (b.y1 - b.y0) * 0.6);
+    });
+    if (!row) { row = []; rows.push(row); }
+    row.push(b);
+  }
+  rows.sort((a, b) => a[0].y0 - b[0].y0);
+  return rows.flatMap((r) => r.sort((a, b) => a.x0 - b.x0));
+}
+
+// Детекция DB (упрощённая, но честная): порог 0.2 по карте вероятностей,
+// компоненты связности, отсев по средней вероятности 0.45, небольшое расширение рамки.
+// Карта — в полном разрешении входа детектора, масштабировать не нужно.
+function ppocrDetectDb(prob, mw, mh) {
+  const THRESH = 0.2, BOX_THRESH = 0.45;
+  const bin = new Uint8Array(mw * mh);
+  for (let i = 0; i < prob.length; i++) bin[i] = prob[i] >= THRESH ? 1 : 0;
+  const label = new Int32Array(mw * mh).fill(-1);
+  const boxes = [];
+  const stack = [];
+  for (let s = 0; s < bin.length; s++) {
+    if (!bin[s] || label[s] !== -1) continue;
+    // label — только отметка «посещено» (значение не важно, проверяем !== -1)
+    let minX = mw, minY = mh, maxX = -1, maxY = -1, area = 0, sumProb = 0;
+    stack.push(s); label[s] = 1;
+    while (stack.length) {
+      const p = stack.pop();
+      const x = p % mw, y = (p / mw) | 0;
+      area++; sumProb += prob[p];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      const nb = [p - 1, p + 1, p - mw, p + mw];
+      for (const q of nb) {
+        if (q < 0 || q >= bin.length) continue;
+        if (x === 0 && q === p - 1) continue;
+        if (x === mw - 1 && q === p + 1) continue;
+        if (bin[q] && label[q] === -1) { label[q] = 1; stack.push(q); }
+      }
+    }
+    const meanProb = area ? sumProb / area : 0;
+    if (area < 3 || meanProb < BOX_THRESH) continue;
+    // Небольшое расширение: классический unclip 1.4 для широких строк даёт ~45 px
+    // на сторону, и соседние строки пересекаются (проверено Node-тестом).
+    const h = maxY - minY + 1;
+    const d = Math.min(6, Math.round(h * 0.15));
+    boxes.push({
+      x0: Math.max(0, minX - d), y0: Math.max(0, minY - d),
+      x1: Math.min(mw, maxX + 1 + d), y1: Math.min(mh, maxY + 1 + d),
+      score: meanProb,
+    });
+  }
+  return sortLineBoxes(boxes);
+}
+
+// Детекция «по строкам»: бинаризация Отсу + горизонтальный профиль.
+// Ряд считается «с чернилами», если тёмных пикселей >= 3% ширины; разрывы до 4 px склеиваются.
+// Для ровных страниц — быстро и без нейросети; на плотном курсиве строки могут слипаться.
+function ppocrDetectLines(gray, w, h) {
+  const thr = otsuThreshold(gray);
+  const profile = new Array(h).fill(0);
+  for (let y = 0; y < h; y++) {
+    let c = 0;
+    for (let x = 0; x < w; x++) if (gray[y * w + x] < thr) c++;
+    profile[y] = c;
+  }
+  const minInk = Math.max(2, Math.round(w * 0.03));
+  const boxes = [];
+  let y = 0;
+  while (y < h) {
+    if (profile[y] < minInk) { y++; continue; }
+    let y0 = y;
+    while (y < h && profile[y] >= minInk) y++;
+    let y1 = y;
+    while (y < h) {
+      let gap = 0;
+      while (y < h && profile[y] < minInk && gap < 4) { y++; gap++; }
+      if (gap < 4 && y < h && profile[y] >= minInk) { while (y < h && profile[y] >= minInk) y++; y1 = y; }
+      else break;
+    }
+    if (y1 - y0 >= 6) boxes.push({ x0: 0, y0: Math.max(0, y0 - 2), x1: w, y1: Math.min(h, y1 + 2), score: 1 });
+  }
+  return sortLineBoxes(boxes);
+}
+
+// CTC-декодирование: argmax -> склеить повторы -> убрать blank (0).
+// Выход модели — уже вероятности, поэтому уверенность строки — среднее максимумов
+// по распознанным символам, без дополнительного softmax.
+function ppocrCtcDecode(data, T, classes) {
+  let prev = -1, text = '', probs = [];
+  for (let t = 0; t < T; t++) {
+    const off = t * classes;
+    let best = 0, bestVal = -Infinity;
+    for (let c = 0; c < classes; c++) { const v = data[off + c]; if (v > bestVal) { bestVal = v; best = c; } }
+    if (best !== 0 && best !== prev) {
+      if (best === 851 && classes === 852) text += ' '; // 851-й класс — пробел
+      else if (best >= 1 && best <= 850) text += PPOCR_DICT_CHARS[best - 1] || '';
+      probs.push(bestVal);
+    }
+    prev = best;
+  }
+  return { text, confidence: probs.length ? probs.reduce((a, b) => a + b, 0) / probs.length : 0 };
+}
+
+// Распознавание страницы в режиме «Рукопись»: детекция -> кропы строк -> rec построчно.
+async function recognizePpocrPage(page) {
+  const tier = ramTier();
+  if (tier.status === 'soon') {
+    // TrOCR пока не подключён: честно отказываемся, не ломая приложение
+    // и не помечая страницу распознанной (done остаётся false).
+    throw new Error('Режим «' + tier.label + '» (лимит ' + tier.gb + ' ГБ) ещё не подключён: для TrOCR нужна переконвертация декодера в формат с KV-кэшем. Выберите лимит 1–2 ГБ (PP-OCRv6) или дождитесь обновления.');
+  }
+  const started = performance.now();
+  const settings = readSettings();
+  setStatus('Готовлю фото: ' + page.name + ' …');
+  const colorCanvas = await prepareColorCanvas(page.src, settings);
+  page.preWidth = colorCanvas.width; page.preHeight = colorCanvas.height;
+  const sessions = await getPpocrSessions();
+  const detCanvas = resizeCanvasTo(colorCanvas, 960);
+  const dw = detCanvas.width, dh = detCanvas.height;
+  const dctx = detCanvas.getContext('2d', { willReadFrequently: true });
+  const detImg = dctx.getImageData(0, 0, dw, dh);
+  const detectMode = (document.querySelector('input[name="ppocrDetect"]:checked') || {}).value || 'auto';
+  let boxes;
+  if (detectMode === 'lines') {
+    const gray = new Uint8Array(dw * dh);
+    const d = detImg.data;
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) gray[p] = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+    boxes = ppocrDetectLines(gray, dw, dh);
+  } else {
+    setStatus('Ищу строки: ' + page.name + ' …');
+    const input = new Float32Array(3 * dh * dw);
+    const mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225];
+    const d = detImg.data;
+    for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) {
+      const s = (y * dw + x) * 4;
+      const r = d[s] / 255, g = d[s + 1] / 255, b = d[s + 2] / 255;
+      input[(0 * dh + y) * dw + x] = (b - mean[2]) / std[2];
+      input[(1 * dh + y) * dw + x] = (g - mean[1]) / std[1];
+      input[(2 * dh + y) * dw + x] = (r - mean[0]) / std[0];
+    }
+    const out = await sessions.det.run({ [sessions.det.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, dh, dw]) });
+    const t = out[sessions.det.outputNames[0]];
+    boxes = ppocrDetectDb(t.data, t.dims[3], t.dims[2]);
+  }
+  if (!boxes.length) {
+    page.text = ''; page.words = []; page.confidence = 0;
+    page.timeMs = Math.round(performance.now() - started);
+    page.done = true; page.engine = 'ppocr';
+    setStatus('Строк не найдено: ' + page.name + '. Попробуйте другой режим детекции или проверьте фото.');
+    return page;
+  }
+  const sx = colorCanvas.width / dw, sy = colorCanvas.height / dh;
+  const lines = [];
+  for (let i = 0; i < boxes.length; i++) {
+    if (stopRequested) break;
+    const b = boxes[i];
+    setStatus('Распознаю строку ' + (i + 1) + ' из ' + boxes.length + ': ' + page.name);
+    setProgress(Math.round(((i + 1) / boxes.length) * 100));
+    const x0 = Math.max(0, Math.round(b.x0 * sx)), y0 = Math.max(0, Math.round(b.y0 * sy));
+    const x1 = Math.min(colorCanvas.width, Math.round(b.x1 * sx)), y1 = Math.min(colorCanvas.height, Math.round(b.y1 * sy));
+    const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
+    const rw = Math.min(640, Math.max(8, Math.round((cw / ch) * 48)));
+    const lineCanvas = document.createElement('canvas');
+    lineCanvas.width = rw; lineCanvas.height = 48;
+    lineCanvas.getContext('2d').drawImage(colorCanvas, x0, y0, cw, ch, 0, 0, rw, 48);
+    const lctx = lineCanvas.getContext('2d', { willReadFrequently: true });
+    const ldata = lctx.getImageData(0, 0, rw, 48).data;
+    const recInput = new Float32Array(3 * 48 * rw);
+    for (let y = 0; y < 48; y++) for (let x = 0; x < rw; x++) {
+      const s = (y * rw + x) * 4;
+      recInput[(0 * 48 + y) * rw + x] = (ldata[s + 2] / 255 - 0.5) / 0.5; // B
+      recInput[(1 * 48 + y) * rw + x] = (ldata[s + 1] / 255 - 0.5) / 0.5; // G
+      recInput[(2 * 48 + y) * rw + x] = (ldata[s] / 255 - 0.5) / 0.5;     // R
+    }
+    const out = await sessions.rec.run({ [sessions.rec.inputNames[0]]: new ort.Tensor('float32', recInput, [1, 3, 48, rw]) });
+    const t = out[sessions.rec.outputNames[0]];
+    const decoded = ppocrCtcDecode(t.data, t.dims[1], t.dims[2]);
+    lines.push({
+      text: decoded.text, confidence: decoded.confidence,
+      bbox: { x0, y0, x1, y1 },
+    });
+  }
+  page.text = lines.map((l) => l.text).join('\n');
+  // Слова для подсветки/оверлея — построчные: клик по строке работает как по слову.
+  page.words = lines.map((l) => ({ text: l.text, confidence: l.confidence * 100, bbox: l.bbox }));
+  page.confidence = lines.length ? (lines.reduce((a, l) => a + l.confidence, 0) / lines.length) * 100 : 0;
+  page.timeMs = Math.round(performance.now() - started);
+  page.done = true; page.engine = 'ppocr';
+  return page;
+}
+
 // ---------- Tesseract.js v6: один воркер на сессию, ленивая загрузка ----------
 async function getWorker(lang) {
   if (typeof Tesseract === 'undefined') {
@@ -198,6 +686,7 @@ function extractWords(data) {
 
 // ---------- Распознавание ----------
 async function recognizePage(page, settingsOverride) {
+  if (currentEngine() === 'ppocr') return recognizePpocrPage(page);
   const lang = $('langSelect').value || 'rus';
   const settings = readSettings(settingsOverride);
   const started = performance.now();
@@ -217,11 +706,15 @@ async function recognizePage(page, settingsOverride) {
   page.confidence = (typeof data.confidence === 'number' ? data.confidence : null);
   page.timeMs = Math.round(performance.now() - started);
   page.done = true;
+  page.engine = 'tesseract';
   return page;
 }
 
 async function recognizeAll() {
-  const todo = pages.filter((p) => !p.done);
+  const engine = currentEngine();
+  // Повторно распознаём страницы, у которых движок отличается от текущего:
+  // например, после переключения «Печать» -> «Рукопись» старые страницы прогоняются заново.
+  const todo = pages.filter((p) => !p.done || p.engine !== engine);
   if (!todo.length) { setStatus('Нет страниц для распознавания: добавьте фото или нажмите «Пример для проверки».'); return; }
   stopRequested = false;
   $('stopBtn').disabled = false; $('recognizeAllBtn').disabled = true;
@@ -251,15 +744,39 @@ function renderQueue() {
   list.innerHTML = '';
   pages.forEach((p) => {
     const li = document.createElement('li');
-    li.textContent = p.name + (p.done ? ' — готово (' + (p.confidence === null ? '—' : Math.round(p.confidence) + '%') + ')' : ' — не распознано');
+    const engineTag = p.engine === 'ppocr' ? ', PP-OCR' : (p.engine === 'tesseract' ? ', Tesseract' : '');
+    li.textContent = p.name + (p.done ? ' — готово (' + (p.confidence === null ? '—' : Math.round(p.confidence) + '%') + engineTag + ')' : ' — не распознано');
     if (p.id === selectedId) li.classList.add('selected');
     if (p.done) li.classList.add('done');
     li.addEventListener('click', () => selectPage(p.id));
     list.appendChild(li);
   });
+  // «Распознать заново» — только для уже распознанной выбранной страницы.
+  const sel = selectedPage();
+  $('reRecognizeBtn').disabled = !(sel && sel.done);
 }
 
 function selectedPage() { return pages.find((p) => p.id === selectedId) || null; }
+
+// Распознать выбранную страницу заново текущим движком
+// (например, после смены настроек или переключения «Печать» <-> «Рукопись»).
+async function reRecognizeSelected() {
+  const page = selectedPage();
+  if (!page) return;
+  page.done = false; page.text = ''; page.words = []; page.confidence = null; page.timeMs = null; page.engine = null;
+  $('reRecognizeBtn').disabled = true; $('recognizeAllBtn').disabled = true; $('stopBtn').disabled = false;
+  try {
+    await recognizePage(page);
+    renderQueue();
+    renderEditor(page);
+    setStatus('Готово: ' + page.name + ' — ' + page.timeMs + ' мс, уверенность ' + (page.confidence === null ? '—' : Math.round(page.confidence) + '%'));
+  } catch (err) {
+    setStatus('Ошибка: ' + (err && err.message ? err.message : err));
+  } finally {
+    $('recognizeAllBtn').disabled = false; $('stopBtn').disabled = true;
+    renderQueue();
+  }
+}
 
 function selectPage(id) {
   selectedId = id;
@@ -316,6 +833,8 @@ function renderEditor(page) {
     return;
   }
   // Слова — отдельные span, неуверенные (<75%) подсвечены и кликабельны.
+  // В режиме «Рукопись» слова — это целые строки, поэтому разделяем их переносами.
+  const separator = page.engine === 'ppocr' ? '\n' : ' ';
   page.words.forEach((wd, i) => {
     const span = document.createElement('span');
     span.textContent = wd.text;
@@ -326,7 +845,7 @@ function renderEditor(page) {
       span.addEventListener('click', () => selectWord(i));
     }
     ed.appendChild(span);
-    ed.appendChild(document.createTextNode(' '));
+    ed.appendChild(document.createTextNode(separator));
   });
   updateStats(page);
 }
@@ -511,6 +1030,59 @@ function applyBenchmark() {
   $('benchStatus').textContent = 'Применено: ' + benchRecommendation.name + '.';
 }
 
+// ---------- PWA: service worker, установка, обновление ----------
+// Регистрация — только если SW поддерживается и страница открыта по http(s),
+// в try/catch: без SW приложение работает как обычный сайт (в т.ч. как file://
+// и в однофайловом артефакте, где sw.js рядом нет).
+let swRegistration = null;
+let deferredInstallPrompt = null;
+
+function registerServiceWorker() {
+  try {
+    if (!('serviceWorker' in navigator)) return;
+    if (window.location.protocol === 'file:') return;
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      swRegistration = reg;
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          // Новый SW установлен, но страницей ещё управляет старый — предлагаем обновиться.
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            $('updateBanner').hidden = false;
+          }
+        });
+      });
+    }).catch(() => { /* SW недоступен — приложение работает и без него */ });
+  } catch (e) { /* ничего не ломаем */ }
+}
+
+function setupPwaInstall() {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    $('installBtn').hidden = false;
+  });
+  $('installBtn').addEventListener('click', async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    try { await deferredInstallPrompt.userChoice; } catch (e) { /* игнорируем */ }
+    deferredInstallPrompt = null;
+    $('installBtn').hidden = true;
+  });
+  // iOS: своего beforeinstallprompt нет — показываем ручную подсказку.
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+  if (isIos && !window.navigator.standalone) $('iosHint').hidden = false;
+  $('updateBtn').addEventListener('click', () => {
+    const waiting = swRegistration && swRegistration.waiting;
+    if (waiting) waiting.postMessage({ type: 'SKIP_WAITING' });
+    else window.location.reload();
+  });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+  }
+}
+
 // ---------- Привязка событий ----------
 function init() {
   if (typeof pdfjsLib !== 'undefined') {
@@ -531,6 +1103,7 @@ function init() {
   });
   $('sampleBtn').addEventListener('click', generateSample);
   $('recognizeAllBtn').addEventListener('click', recognizeAll);
+  $('reRecognizeBtn').addEventListener('click', reRecognizeSelected);
   $('stopBtn').addEventListener('click', () => { stopRequested = true; });
   $('copyBtn').addEventListener('click', copyText);
   $('exportTxtBtn').addEventListener('click', exportTxt);
@@ -542,6 +1115,29 @@ function init() {
   $('contrastRange').addEventListener('input', (e) => { $('contrastValue').textContent = e.target.value; });
   $('rotateRange').addEventListener('input', (e) => { $('rotateValue').textContent = e.target.value; });
   $('transcribeMode').addEventListener('change', (e) => { $('transcribeWarning').hidden = !e.target.checked; });
+  document.querySelectorAll('input[name="engine"]').forEach((r) => r.addEventListener('change', updateEngineUi));
+  updateEngineUi();
+  // Лимит памяти: восстановить из localStorage (по умолчанию 2 ГБ).
+  try {
+    const stored = parseInt(localStorage.getItem(RAM_LIMIT_KEY) || '', 10);
+    if (stored >= 1 && stored <= 8) $('ramRange').value = String(stored);
+  } catch (e) { /* localStorage может быть недоступен */ }
+  updateRamUi();
+  $('ramRange').addEventListener('input', () => { onRamLimitChange(); });
+  document.querySelectorAll('input[name="ppocrAccuracy"]').forEach((r) => r.addEventListener('change', async () => {
+    updateRamUi();
+    try { await releasePpocrSessionsForTier(); } catch (e) { /* выгрузка необязательна */ }
+  }));
+  registerServiceWorker();
+  setupPwaInstall();
   window.addEventListener('resize', () => { const p = selectedPage(); if (p) drawOverlay(p, -1); });
 }
 document.addEventListener('DOMContentLoaded', init);
+
+// Показ/скрытие настроек в зависимости от выбранного движка.
+function updateEngineUi() {
+  const ppocr = currentEngine() === 'ppocr';
+  $('ppocrSettings').hidden = !ppocr;
+  $('ppocrWarning').hidden = !ppocr;
+  $('tesseractSettings').style.display = ppocr ? 'none' : 'contents';
+}

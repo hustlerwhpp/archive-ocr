@@ -3,6 +3,10 @@
 body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #f6f1ea; color: #222; line-height: 1.5; }
 .header { background: #2e4a3d; color: #fff; padding: 20px 24px; }
 .header h1 { margin: 0 0 6px; font-size: 28px; }
+.pwa-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.pwa-row .hint { color: #d8e6dd; }
+#ramTierInfo { margin: 4px 0 0; }
+#trocrSoonWarning { margin: 8px 0 0; }
 .subtitle, .hint { margin: 4px 0; }
 .hint { color: #666; font-size: 13px; }
 .header .hint { color: #d8e6dd; }
@@ -14,6 +18,8 @@ body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ari
 .settings-grid select, .settings-grid input[type="range"] { width: 100%; padding: 8px; }
 .quality { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
 .quality label { display: flex; gap: 6px; align-items: flex-start; }
+#ppocrSettings { margin-top: 12px; }
+#ppocrSettings .settings-grid { margin-top: 0; }
 .check { display: flex; gap: 8px; align-items: center; }
 .warning { background: #fff3cd; border: 1px solid #e6c200; border-radius: 8px; padding: 10px 12px; }
 .dropzone { border: 2px dashed #2e4a3d; border-radius: 10px; padding: 28px 16px; text-align: center; background: #f2f7f3; cursor: pointer; }
