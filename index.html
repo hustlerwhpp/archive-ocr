@@ -17,13 +17,18 @@
 </head>
 <body>
 <header class="header">
-  <h1>Архив OCR</h1>
+  <div class="header-inner">
+  <div class="brand-row">
+    <span class="brand-mark" aria-hidden="true">А</span>
+    <h1>Архив OCR</h1>
+  </div>
   <p class="subtitle">Оцифровка рукописей и машинописного текста — полностью в браузере, без сервера. Фото не покидают этот компьютер.</p>
   <p class="hint">Бесплатно, без ключей и регистрации. Первый запуск скачивает движок и языковые данные (~10–15 МБ), дальше работает офлайн из кэша браузера.</p>
   <div class="pwa-row">
     <button id="installBtn" type="button" hidden>Установить приложение</button>
     <span id="iosHint" class="hint" hidden>На iPhone/iPad: «Поделиться» → «На экран “Домой”» — приложение появится как отдельное и будет работать офлайн.</span>
     <span id="updateBanner" class="hint" hidden>Доступна новая версия приложения. <button id="updateBtn" type="button">Обновить</button></span>
+  </div>
   </div>
 </header>
 
@@ -39,7 +44,7 @@
         </fieldset>
         <fieldset class="quality">
           <legend>Лимит памяти (нейросети)</legend>
-          <label>Максимум RAM вкладки: <span id="ramValue">2 ГБ</span>
+          <label class="range-label">Максимум RAM вкладки: <span id="ramValue">2 ГБ</span>
             <input type="range" id="ramRange" min="1" max="8" step="1" value="2">
           </label>
           <p id="ramTierInfo" class="hint"></p>
@@ -157,10 +162,12 @@
       <button id="benchStopBtn" type="button" disabled>Остановить бенчмарк</button>
     </div>
     <p id="benchStatus" class="status" role="status">Бенчмарк ещё не запускался.</p>
+    <div class="table-wrap">
     <table id="benchTable" class="bench-table" hidden>
       <thead><tr><th>Режим</th><th>Время</th><th>Точность</th><th>Уверенность</th></tr></thead>
       <tbody id="benchBody"></tbody>
     </table>
+    </div>
     <p id="benchRecommendation" class="recommendation" hidden></p>
     <button id="applyBenchBtn" type="button" class="primary" hidden>Применить рекомендованный режим</button>
   </section>
