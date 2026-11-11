@@ -21,6 +21,10 @@ body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ari
 #ppocrSettings { margin-top: 12px; }
 #ppocrSettings .settings-grid { margin-top: 0; }
 .check { display: flex; gap: 8px; align-items: center; }
+/* .settings-grid label имеет больший приоритет (класс + элемент), чем .check,
+   поэтому без этого правила чекбоксы внутри сетки падали в display:grid:
+   галочка уходила в отдельную строку от текста. */
+.settings-grid label.check { display: flex; align-items: center; gap: 8px; }
 .warning { background: #fff3cd; border: 1px solid #e6c200; border-radius: 8px; padding: 10px 12px; }
 .dropzone { border: 2px dashed #2e4a3d; border-radius: 10px; padding: 28px 16px; text-align: center; background: #f2f7f3; cursor: pointer; }
 .dropzone.drag { background: #dbeadf; outline: 3px solid #2e4a3d; }

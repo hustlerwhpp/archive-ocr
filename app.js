@@ -171,6 +171,46 @@ function readSettings(overrides) {
   };
 }
 
+// Настройки распознавания — в localStorage, чтобы перезагрузка страницы
+// (в т.ч. автоматическая при обновлении service worker: controllerchange
+// делает location.reload()) не сбрасывала их молча на значения по умолчанию.
+// Именно так режим качества «переключался сам» с «Экономного» на «Обычный»
+// в живом тесте: страница перезагрузилась, а качество не сохранялось.
+// Лимит памяти хранится отдельно (archiveOcrRamLimitGb) — не трогаем.
+const SETTINGS_KEY = 'archiveOcrSettings';
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      quality: currentQuality(),
+      binarize: $('binarizeCheck').checked,
+      grayscale: $('grayscaleCheck').checked,
+      contrast: $('contrastRange').value,
+      rotate: $('rotateRange').value,
+      engine: currentEngine(),
+      ppocrDetect: (document.querySelector('input[name="ppocrDetect"]:checked') || {}).value || 'auto',
+      ppocrAccuracy: ppocrAccuracy(),
+    }));
+  } catch (e) { /* localStorage может быть недоступен */ }
+}
+function restoreSettings() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch (e) { /* игнорируем */ }
+  if (!s || typeof s !== 'object') return;
+  const setRadio = (name, value) => {
+    if (value === undefined || value === null) return;
+    const r = document.querySelector('input[name="' + name + '"][value="' + value + '"]');
+    if (r) r.checked = true;
+  };
+  setRadio('quality', s.quality);
+  if (typeof s.binarize === 'boolean') $('binarizeCheck').checked = s.binarize;
+  if (typeof s.grayscale === 'boolean') $('grayscaleCheck').checked = s.grayscale;
+  if (s.contrast !== undefined) { $('contrastRange').value = s.contrast; $('contrastValue').textContent = s.contrast; }
+  if (s.rotate !== undefined) { $('rotateRange').value = s.rotate; $('rotateValue').textContent = s.rotate; }
+  setRadio('engine', s.engine);
+  setRadio('ppocrDetect', s.ppocrDetect);
+  setRadio('ppocrAccuracy', s.ppocrAccuracy);
+}
+
 // ---------- Режим «Рукопись»: PP-OCRv6 (ONNX, onnxruntime-web, всё локально) ----------
 // Детектор строк: PP-OCRv6 tiny det (PaddlePaddle, ~1,7 МБ).
 // Распознаватель строк: PP-OCRv6 tiny/medium rec Cyrillic (Metrika Labs, ~2,4 / ~60 МБ).
@@ -350,6 +390,25 @@ function resizeCanvasTo(srcCanvas, maxSide) {
   canvas.width = Math.max(1, Math.round(srcCanvas.width * scale));
   canvas.height = Math.max(1, Math.round(srcCanvas.height * scale));
   canvas.getContext('2d').drawImage(srcCanvas, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+// Ресайз именно для детектора DBNet: стороны входа ОБЯЗАТЕЛЬНО кратны 32.
+// Иначе внутренние карты признаков ветвей FPN расходятся на 1 px и
+// onnxruntime-web падает с «Shape mismatch attempting to re-use buffer»
+// уже на первом запуске (проверено Node-зондом 2026-11-11: вход 828x560 —
+// {1,64,35,52} != {1,64,36,52}; вход 677x960 — {1,64,60,43} != {1,64,60,44},
+// точь-в-точь ошибка из живого теста на archive.whpp.site).
+// Поэтому округляем каждую сторону к ближайшему кратному 32 (минимум 32).
+function resizeCanvasForDet(srcCanvas, maxSide) {
+  const longest = Math.max(srcCanvas.width, srcCanvas.height);
+  const scale = longest > maxSide ? maxSide / longest : 1;
+  const w = Math.max(32, Math.round((srcCanvas.width * scale) / 32) * 32);
+  const h = Math.max(32, Math.round((srcCanvas.height * scale) / 32) * 32);
+  if (w === srcCanvas.width && h === srcCanvas.height) return srcCanvas;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(srcCanvas, 0, 0, w, h);
   return canvas;
 }
 
@@ -567,6 +626,14 @@ function ppocrCtcDecode(data, T, classes) {
   return { text, confidence: probs.length ? probs.reduce((a, b) => a + b, 0) / probs.length : 0 };
 }
 
+// Максимальная ширина входа распознавателя строк: 960 (было 640).
+// Ширина задаёт число шагов CTC: T = rw/8. При cap 640 длинные строки
+// обрезались (T=80, ~25 символов на строку). Замер на тестовом фото
+// (рукописная страница, Tiny): cap 640 — 39% точности, cap 960 — 59%
+// (тот же билинейный ресемпл), cap 1280 — 65%, но уже заметно медленнее
+// и тяжелее для слабых ПК. 960 — баланс.
+const PPOCR_REC_MAX_WIDTH = 960;
+
 // Распознавание страницы в режиме «Рукопись»: детекция -> кропы строк -> rec построчно.
 async function recognizePpocrPage(page) {
   const tier = ramTier();
@@ -581,7 +648,8 @@ async function recognizePpocrPage(page) {
   const colorCanvas = await prepareColorCanvas(page.src, settings);
   page.preWidth = colorCanvas.width; page.preHeight = colorCanvas.height;
   const sessions = await getPpocrSessions();
-  const detCanvas = resizeCanvasTo(colorCanvas, 960);
+  // Детектор — только через resizeCanvasForDet (стороны кратны 32, см. выше).
+  const detCanvas = resizeCanvasForDet(colorCanvas, 960);
   const dw = detCanvas.width, dh = detCanvas.height;
   const dctx = detCanvas.getContext('2d', { willReadFrequently: true });
   const detImg = dctx.getImageData(0, 0, dw, dh);
@@ -625,12 +693,17 @@ async function recognizePpocrPage(page) {
     const x0 = Math.max(0, Math.round(b.x0 * sx)), y0 = Math.max(0, Math.round(b.y0 * sy));
     const x1 = Math.min(colorCanvas.width, Math.round(b.x1 * sx)), y1 = Math.min(colorCanvas.height, Math.round(b.y1 * sy));
     const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
-    const rw = Math.min(640, Math.max(8, Math.round((cw / ch) * 48)));
+    const rw = Math.min(PPOCR_REC_MAX_WIDTH, Math.max(8, Math.round((cw / ch) * 48)));
     const lineCanvas = document.createElement('canvas');
     lineCanvas.width = rw; lineCanvas.height = 48;
-    lineCanvas.getContext('2d').drawImage(colorCanvas, x0, y0, cw, ch, 0, 0, rw, 48);
-    const lctx = lineCanvas.getContext('2d', { willReadFrequently: true });
-    const ldata = lctx.getImageData(0, 0, rw, 48).data;
+    const lineCtx = lineCanvas.getContext('2d', { willReadFrequently: true });
+    // Качественный ресемпл: по умолчанию drawImage — билинейный, он размывает
+    // тонкие штрихи курсива (замер: 39% точности против 45% у Lanczos при cap 640).
+    // 'high' включает лучший фильтр браузера; остальное даёт cap 960 (см. выше).
+    lineCtx.imageSmoothingEnabled = true;
+    lineCtx.imageSmoothingQuality = 'high';
+    lineCtx.drawImage(colorCanvas, x0, y0, cw, ch, 0, 0, rw, 48);
+    const ldata = lineCtx.getImageData(0, 0, rw, 48).data;
     const recInput = new Float32Array(3 * 48 * rw);
     for (let y = 0; y < 48; y++) for (let x = 0; x < rw; x++) {
       const s = (y * rw + x) * 4;
@@ -1112,10 +1185,15 @@ function init() {
   $('fullBenchBtn').addEventListener('click', fullBenchmark);
   $('benchStopBtn').addEventListener('click', () => { benchStopRequested = true; });
   $('applyBenchBtn').addEventListener('click', applyBenchmark);
-  $('contrastRange').addEventListener('input', (e) => { $('contrastValue').textContent = e.target.value; });
-  $('rotateRange').addEventListener('input', (e) => { $('rotateValue').textContent = e.target.value; });
+  $('contrastRange').addEventListener('input', (e) => { $('contrastValue').textContent = e.target.value; saveSettings(); });
+  $('rotateRange').addEventListener('input', (e) => { $('rotateValue').textContent = e.target.value; saveSettings(); });
   $('transcribeMode').addEventListener('change', (e) => { $('transcribeWarning').hidden = !e.target.checked; });
-  document.querySelectorAll('input[name="engine"]').forEach((r) => r.addEventListener('change', updateEngineUi));
+  document.querySelectorAll('input[name="engine"]').forEach((r) => r.addEventListener('change', () => { updateEngineUi(); saveSettings(); }));
+  document.querySelectorAll('input[name="quality"]').forEach((r) => r.addEventListener('change', saveSettings));
+  $('binarizeCheck').addEventListener('change', saveSettings);
+  $('grayscaleCheck').addEventListener('change', saveSettings);
+  document.querySelectorAll('input[name="ppocrDetect"]').forEach((r) => r.addEventListener('change', saveSettings));
+  restoreSettings(); // до updateEngineUi/updateRamUi: они читают восстановленные радио
   updateEngineUi();
   // Лимит памяти: восстановить из localStorage (по умолчанию 2 ГБ).
   try {
@@ -1126,6 +1204,7 @@ function init() {
   $('ramRange').addEventListener('input', () => { onRamLimitChange(); });
   document.querySelectorAll('input[name="ppocrAccuracy"]').forEach((r) => r.addEventListener('change', async () => {
     updateRamUi();
+    saveSettings();
     try { await releasePpocrSessionsForTier(); } catch (e) { /* выгрузка необязательна */ }
   }));
   registerServiceWorker();
