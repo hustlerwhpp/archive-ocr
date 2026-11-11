@@ -6,7 +6,7 @@
    Версия кэша: при обновлении приложения меняйте CACHE_NAME на новое имя. */
 'use strict';
 
-const CACHE_NAME = 'archive-ocr-v1';
+const CACHE_NAME = 'archive-ocr-v2'; // v2: фикс PP-OCR (bbfcf753) — иначе старый SW отдавал старый app.js из кэша v1
 
 const SHELL_URLS = [
   '/',
