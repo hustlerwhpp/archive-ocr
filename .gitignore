@@ -1,0 +1,10 @@
+# Сборки нет, но на всякий случай — стандартные игнорируемые файлы
+node_modules/
+dist/
+build/
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+!.env.example

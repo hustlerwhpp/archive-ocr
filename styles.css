@@ -1,0 +1,47 @@
+/* Архив OCR — простые стили, без фреймворков. Светлая тема, крупные кнопки для работы в архиве. */
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #f6f1ea; color: #222; line-height: 1.5; }
+.header { background: #2e4a3d; color: #fff; padding: 20px 24px; }
+.header h1 { margin: 0 0 6px; font-size: 28px; }
+.subtitle, .hint { margin: 4px 0; }
+.hint { color: #666; font-size: 13px; }
+.header .hint { color: #d8e6dd; }
+.layout { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+.panel { background: #fff; border: 1px solid #ddd6c8; border-radius: 10px; padding: 16px 18px; }
+.panel h2 { margin-top: 0; font-size: 20px; }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+.settings-grid label, .settings-grid fieldset { display: grid; gap: 6px; font-size: 14px; }
+.settings-grid select, .settings-grid input[type="range"] { width: 100%; padding: 8px; }
+.quality { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
+.quality label { display: flex; gap: 6px; align-items: flex-start; }
+.check { display: flex; gap: 8px; align-items: center; }
+.warning { background: #fff3cd; border: 1px solid #e6c200; border-radius: 8px; padding: 10px 12px; }
+.dropzone { border: 2px dashed #2e4a3d; border-radius: 10px; padding: 28px 16px; text-align: center; background: #f2f7f3; cursor: pointer; }
+.dropzone.drag { background: #dbeadf; outline: 3px solid #2e4a3d; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+button { padding: 10px 14px; border-radius: 8px; border: 1px solid #2e4a3d; background: #fff; color: #2e4a3d; cursor: pointer; font-size: 15px; }
+button:hover:not(:disabled) { background: #eef4ef; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: #2e4a3d; color: #fff; }
+.progress { height: 12px; background: #eee; border-radius: 6px; overflow: hidden; }
+.progress-bar { height: 100%; background: #2e7d5b; transition: width 0.2s; }
+.status { min-height: 1.5em; }
+.queue { margin: 8px 0; padding-left: 20px; }
+.queue li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.queue li.selected { background: #eef4ef; font-weight: 600; }
+.queue li.done { color: #2e7d5b; }
+.editor { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 800px) { .editor { grid-template-columns: 1fr; } }
+.preview-wrap { position: relative; border: 1px solid #ddd; border-radius: 8px; min-height: 320px; background: #fafafa; overflow: hidden; }
+.preview-wrap img { width: 100%; display: block; }
+.preview-wrap canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: auto; }
+.preview-empty { padding: 24px; color: #666; }
+.text-editor { min-height: 320px; border: 1px solid #ddd; border-radius: 8px; padding: 12px; background: #fff; white-space: pre-wrap; overflow: auto; }
+.text-editor .low { background: #ffe08a; border-bottom: 2px solid #e6a800; cursor: pointer; }
+.text-editor .low.selected-word { background: #ffb84d; outline: 2px solid #c47f00; }
+.stats { font-size: 14px; color: #444; }
+.bench-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.bench-table th, .bench-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+.bench-table tr.best td { background: #e6f4ea; font-weight: 600; }
+.recommendation { background: #e6f4ea; border: 1px solid #2e7d5b; border-radius: 8px; padding: 10px 12px; }
+.footer { max-width: 1100px; margin: 0 auto 24px; padding: 0 16px; color: #555; font-size: 13px; }

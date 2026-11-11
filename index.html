@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Архив OCR — оцифровка рукописей и машинописного текста</title>
+<link rel="stylesheet" href="styles.css">
+<!-- Tesseract.js v6 — движок OCR, работает в браузере через WebAssembly -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
+<!-- pdf.js 3.11.174 — рендер страниц PDF в Canvas, тоже локально -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<!-- docx 8.5.0 — экспорт в .docx, необязательно: без него работает fallback в .txt -->
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+</head>
+<body>
+<header class="header">
+  <h1>Архив OCR</h1>
+  <p class="subtitle">Оцифровка рукописей и машинописного текста — полностью в браузере, без сервера. Фото не покидают этот компьютер.</p>
+  <p class="hint">Бесплатно, без ключей и регистрации. Первый запуск скачивает движок и языковые данные (~10–15 МБ), дальше работает офлайн из кэша браузера.</p>
+</header>
+
+<main class="layout">
+  <section class="panel" aria-label="Настройки">
+    <details open>
+      <summary><strong>Настройки распознавания</strong></summary>
+      <div class="settings-grid">
+        <label>Язык
+          <select id="langSelect">
+            <option value="rus" selected>Русский (rus)</option>
+            <option value="rus+eng">Русский + английский (rus+eng)</option>
+            <option value="eng">Английский (eng)</option>
+          </select>
+        </label>
+        <label>Режим страницы (PSM)
+          <select id="psmSelect">
+            <option value="3" selected>3 — автоматически</option>
+            <option value="6">6 — однородный блок текста</option>
+            <option value="11">11 — разреженный текст</option>
+            <option value="4">4 — одна колонка</option>
+          </select>
+        </label>
+        <fieldset class="quality">
+          <legend>Режим качества (для слабых ПК)</legend>
+          <label><input type="radio" name="quality" value="economy"> Экономный — до 1200 px, быстрее всего</label>
+          <label><input type="radio" name="quality" value="normal" checked> Обычный — до 1800 px</label>
+          <label><input type="radio" name="quality" value="max"> Максимальное — до 2400 px, медленнее</label>
+        </fieldset>
+        <label class="check"><input type="checkbox" id="binarizeCheck" checked> Бинаризация по Отсу (чёрно-белый текст)</label>
+        <label class="check"><input type="checkbox" id="grayscaleCheck" checked> Градации серого</label>
+        <label>Контраст <span id="contrastValue">1.2</span>
+          <input type="range" id="contrastRange" min="0.8" max="2.0" step="0.1" value="1.2">
+        </label>
+        <label>Поворот, градусы <span id="rotateValue">0</span>
+          <input type="range" id="rotateRange" min="-15" max="15" step="1" value="0">
+        </label>
+      </div>
+      <label class="check"><input type="checkbox" id="transcribeMode"> Помощник транскрибации (рукописи)</label>
+      <p id="transcribeWarning" class="warning" hidden>
+        Внимание: Tesseract плохо читает рукописный текст, особенно курсив и старую орфографию.
+        Результат ниже — только черновик для ручной сверки с оригиналом, а не автоматическая оцифровка рукописи.
+      </p>
+    </details>
+  </section>
+
+  <section class="panel" aria-label="Загрузка">
+    <h2>1. Загрузка</h2>
+    <div id="dropZone" class="dropzone" tabindex="0">
+      Перетащите сюда фото (JPG, PNG, WebP) или PDF,<br>
+      или нажмите, чтобы выбрать файлы.<br>
+      <small>Вставка из буфера тоже работает: Ctrl+V</small>
+      <input type="file" id="fileInput" accept="image/*,.pdf,application/pdf" multiple hidden>
+    </div>
+    <div class="row">
+      <button id="sampleBtn" type="button">Пример для проверки</button>
+      <button id="recognizeAllBtn" type="button" class="primary">Распознать всё</button>
+      <button id="stopBtn" type="button" disabled>Стоп</button>
+    </div>
+    <div class="progress" aria-label="Прогресс распознавания">
+      <div id="progressBar" class="progress-bar" style="width:0%"></div>
+    </div>
+    <p id="status" class="status" role="status">Готово к работе. Движок загрузится только при первом распознавании.</p>
+    <h3>Очередь страниц</h3>
+    <ol id="queueList" class="queue"></ol>
+    <p class="hint">Распознавание идёт по одной странице, с паузой между страницами, чтобы не перегружать компьютер.</p>
+  </section>
+
+  <section class="panel" aria-label="Редактор">
+    <h2>2. Проверка и правка</h2>
+    <div class="editor">
+      <div class="preview-wrap" id="previewWrap">
+        <img id="previewImg" alt="Страница для проверки — выберите страницу в очереди" src="">
+        <canvas id="overlayCanvas"></canvas>
+        <p id="previewEmpty" class="preview-empty">Выберите страницу в очереди — здесь будет фото, а справа текст.</p>
+      </div>
+      <div class="text-col">
+        <div id="textEditor" class="text-editor" contenteditable="true" spellcheck="false" aria-label="Распознанный текст, можно править">Здесь появится распознанный текст. Неуверенные слова будут подсвечены жёлтым — нажмите на такое слово, чтобы увидеть его место на фото.</div>
+        <p class="hint">Клик по подсвеченному слову — рамка на фото. Клик по рамке на фото — подсветка слова в тексте.</p>
+        <p id="stats" class="stats">Символов: 0 · Слов: 0 · Уверенность: — · Время: —</p>
+        <div class="row">
+          <button id="copyBtn" type="button">Копировать текст</button>
+          <button id="exportTxtBtn" type="button">Скачать .txt</button>
+          <button id="exportDocxBtn" type="button">Скачать .docx</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Бенчмарк">
+    <h2>3. Бенчмарк — подобрать быстрый режим для этого компьютера</h2>
+    <p>Бенчмарк прогоняет образец архивной справки на разных настройках и выбирает самый быстрый режим без заметной потери точности. Прогоны идут по одному, с паузами, — компьютер не перегружается.</p>
+    <div class="row">
+      <button id="expressBtn" type="button">Экспресс-тест (~2 сек, офлайн)</button>
+      <button id="fullBenchBtn" type="button" class="primary">Полный бенчмарк</button>
+      <button id="benchStopBtn" type="button" disabled>Остановить бенчмарк</button>
+    </div>
+    <p id="benchStatus" class="status" role="status">Бенчмарк ещё не запускался.</p>
+    <table id="benchTable" class="bench-table" hidden>
+      <thead><tr><th>Режим</th><th>Время</th><th>Точность</th><th>Уверенность</th></tr></thead>
+      <tbody id="benchBody"></tbody>
+    </table>
+    <p id="benchRecommendation" class="recommendation" hidden></p>
+    <button id="applyBenchBtn" type="button" class="primary" hidden>Применить рекомендованный режим</button>
+  </section>
+</main>
+
+<footer class="footer">
+  <p>Всё считается локально. Нет сервера, нет отправки фото, нет платных ключей.</p>
+  <p>Ограничение: рукописи Tesseract читает плохо — используйте режим помощника транскрибации и сверяйте вручную. Следующий шаг развития — локальная нейросеть PP-OCRv6 Cyrillic (см. README).</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
